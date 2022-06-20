@@ -1,6 +1,7 @@
 package com.alick.learnopengles.gl
 
 import android.opengl.GLES20
+import android.opengl.Matrix
 import com.alick.learnopengles.R
 import com.alick.learnopengles.utils.RawUtils
 import java.nio.ByteBuffer
@@ -15,8 +16,8 @@ import javax.microedition.khronos.opengles.GL10
  * @date 2022/6/18 22:28
  */
 class Triangle : Shape() {
-
     private var vertexBuffer: FloatBuffer? = null
+    private var colorBuffer: FloatBuffer? = null
     private var mProgram = 0
 
     val COORDS_PER_VERTEX = 3
@@ -29,8 +30,6 @@ class Triangle : Shape() {
     private var mPositionHandle = 0
     private var mColorHandle = 0
 
-    private val mViewMatrix = FloatArray(16)
-
     //顶点个数
     private val vertexCount = triangleCoords.size / COORDS_PER_VERTEX
 
@@ -38,27 +37,40 @@ class Triangle : Shape() {
     private val vertexStride = COORDS_PER_VERTEX * 4 // 每个顶点四个字节
 
 
-    private val mMatrixHandler = 0
+    private var mMatrixHandler = 0
 
     //设置颜色，依次为红绿蓝和透明通道
-    var color = floatArrayOf(1.0f, 1.0f, 1.0f, 1.0f)
+    var color = floatArrayOf(
+        1.0f, 0.0f, 0.0f, 1.0f,
+        0.0f, 1.0f, 0.0f, 1.0f,
+        0.0f, 0.0f, 1.0f, 1.0f
+    )
 
     private val vertexShaderCode = RawUtils.getRawContent(R.raw.triangle_vert)
     private val fragmentShaderCode = RawUtils.getRawContent(R.raw.triangle_frag)
 
 
+    private val mViewMatrix = FloatArray(16)
+    private val mProjectMatrix = FloatArray(16)
+    private val mMVPMatrix = FloatArray(16)
+
     override fun onSurfaceCreated(gl: GL10, config: EGLConfig) {
         //将背景设置为灰色
         GLES20.glClearColor(0.5f, 0.5f, 0.5f, 1.0f)
         //申请底层空间
-        val bb = ByteBuffer.allocateDirect(
-            triangleCoords.size * 4
-        )
-        bb.order(ByteOrder.nativeOrder())
+        vertexBuffer = ByteBuffer.allocateDirect(triangleCoords.size * 4).apply {
+            order(ByteOrder.nativeOrder())
+        }.asFloatBuffer().apply {
+            put(triangleCoords)
+            position(0)
+        }
+        colorBuffer = ByteBuffer.allocateDirect(color.size * 4).apply {
+            order(ByteOrder.nativeOrder())
+        }.asFloatBuffer().apply {
+            put(color)
+            position(0)
+        }
 
-        vertexBuffer = bb.asFloatBuffer()
-        vertexBuffer!!.put(triangleCoords)
-        vertexBuffer!!.position(0)
         val vertexShader = loadShader(GLES20.GL_VERTEX_SHADER, vertexShaderCode)
         val fragmentShader = loadShader(GLES20.GL_FRAGMENT_SHADER, fragmentShaderCode)
 
@@ -73,13 +85,24 @@ class Triangle : Shape() {
     }
 
     override fun onSurfaceChanged(gl: GL10, width: Int, height: Int) {
-        GLES20.glViewport(0, 0, width, height)
+        //计算宽高比
+        val ratio = width.toFloat() / height
+        //设置透视投影(这个投影矩阵应用于onDrawFrame()方法中的对象坐标)
+        Matrix.frustumM(mProjectMatrix, 0, -ratio, ratio, -1f, 1f, 3f, 7f)
+        //设置相机位置
+        Matrix.setLookAtM(mViewMatrix, 0, 0f, 0f, 7.0f, 0f, 0f, 0f, 0f, 1.0f, 0.0f)
+        //计算变换矩阵
+        Matrix.multiplyMM(mMVPMatrix, 0, mProjectMatrix, 0, mViewMatrix, 0)
     }
 
     override fun onDrawFrame(gl: GL10) {
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
         //将程序加入到OpenGLES2.0环境
         GLES20.glUseProgram(mProgram)
+        //获取变换矩阵vMatrix成员句柄
+        mMatrixHandler = GLES20.glGetUniformLocation(mProgram, "vMatrix")
+        //指定vMatrix的值
+        GLES20.glUniformMatrix4fv(mMatrixHandler, 1, false, mMVPMatrix, 0)
         //获取顶点着色器的vPosition成员句柄
         mPositionHandle = GLES20.glGetAttribLocation(mProgram, "vPosition")
         //启用三角形顶点的句柄
@@ -91,13 +114,19 @@ class Triangle : Shape() {
             vertexStride, vertexBuffer
         )
         //获取片元着色器的vColor成员的句柄
-        mColorHandle = GLES20.glGetUniformLocation(mProgram, "vColor")
+        mColorHandle = GLES20.glGetAttribLocation(mProgram, "aColor")
         //设置绘制三角形的颜色
-        GLES20.glUniform4fv(mColorHandle, 1, color, 0)
+        GLES20.glEnableVertexAttribArray(mColorHandle)
+        GLES20.glVertexAttribPointer(
+            mColorHandle, 4,
+            GLES20.GL_FLOAT, false,
+            0, colorBuffer
+        )
         //绘制三角形
         GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, vertexCount)
         //禁止顶点数组的句柄
         GLES20.glDisableVertexAttribArray(mPositionHandle)
+
     }
 
 }
